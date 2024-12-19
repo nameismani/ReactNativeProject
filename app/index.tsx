@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Text,
   View,
@@ -7,31 +7,79 @@ import {
   StyleSheet,
   Button,
   FlatList,
+  Modal,
 } from "react-native";
 
-import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { formatTime } from "@/libs/helpers";
+import { useTheme } from "@/provider/ThemeProvider";
+import { ThemeType } from "@/constants/Colors";
+import { ThemedText } from "@/components/ThemedText";
+import Animated, { LinearTransition } from "react-native-reanimated";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { StatusBar } from "expo-status-bar";
+import GoalModal, { GoalModalRef } from "@/components/GoalModal";
+import GoalItem from "@/components/GoalItem";
 
 export interface GoalsType {
   id: number;
   goalName: string;
-  goalIsCompleted: boolean;
-  createdAt: number;
+  goalIsCompleted?: boolean;
+  createdAt?: number;
 }
 export default function Goals() {
-  const [goals, setGoals] = useState<GoalsType[]>([
-    {
-      id: 1,
-      goalName: "Learn React Native",
-      goalIsCompleted: false,
-      createdAt: Date.now(),
-    },
-  ]);
-  const [newGoal, setNewGoal] = useState<string>("");
-  const styles = createStyles();
+  const [goals, setGoals] = useState<GoalsType[]>([]);
+  const [searchGoal, setSearchGoal] = useState<string>("");
+  const { colorScheme, setColorScheme, theme } = useTheme();
+  const goalModalRef = useRef<GoalModalRef>(null);
+  const keys = ["goalName"];
+  const styles = createStyles(theme, colorScheme);
 
-  const addGoal = () => {
+  const filteredGoals = goals.filter((goal) =>
+    keys.some((key) =>
+      goal[key as keyof GoalsType]
+        ?.toString()
+        ?.toLowerCase()
+        .includes(searchGoal.toLowerCase())
+    )
+  );
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const jsonValue = await AsyncStorage.getItem("Goals");
+        const storedGoals = jsonValue != null ? JSON.parse(jsonValue) : null;
+        if (storedGoals && storedGoals.length) {
+          setGoals(storedGoals);
+        } else {
+          setGoals([
+            {
+              id: 1,
+              goalName: "Learn React Native",
+              goalIsCompleted: false,
+              createdAt: Date.now(),
+            },
+          ]);
+        }
+      } catch (err) {
+        console.log(err);
+      }
+    };
+    fetchData();
+  }, []);
+  useEffect(() => {
+    const storeData = async () => {
+      try {
+        const jsonValue = JSON.stringify(goals);
+        await AsyncStorage.setItem("Goals", jsonValue);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    storeData();
+  }, [goals]);
+  const addGoal = (newGoal: string) => {
     if (!newGoal.trim()) {
       return;
     }
@@ -43,7 +91,6 @@ export default function Goals() {
       createdAt: Date.now(),
     };
     setGoals((prev) => [...(prev ?? {}), newGoalObject]);
-    setNewGoal("");
   };
 
   const updateGoal = (id: number) => {
@@ -57,68 +104,53 @@ export default function Goals() {
   const deleteGoal = (id: number) => {
     setGoals(goals.filter((goal) => goal.id != id));
   };
-  const renderItem = ({ item }: any) => {
-    // const formattedDate = dayjs(item.createdAt).format("YYYY-MM-DD HH:mm:ss");
-    const timeAgo = formatTime(item.createdAt);
-    return (
-      <View style={styles.goalContainer}>
-        <View style={styles.goal}>
-          <Text
-            style={{
-              ...styles.goalText,
-              ...(item?.goalIsCompleted ? styles?.goalCompletedText : {}),
-            }}
-            onPress={() => updateGoal(item.id)}
-          >
-            {item.goalName}
-          </Text>
-          <Pressable onPress={() => deleteGoal(item.id)}>
-            <MaterialCommunityIcons
-              name="delete-circle"
-              size={36}
-              color="red"
-              selectable={undefined}
-            />
-          </Pressable>
-        </View>
-        <Text style={styles.goalCreatedTime}>{timeAgo}</Text>
-      </View>
-    );
-  };
+  const renderItem = ({ item }: any) => (
+    <GoalItem item={item} updateGoal={updateGoal} deleteGoal={deleteGoal} />
+  );
   return (
     <SafeAreaView style={styles.viewContainer}>
       <View style={styles.inputContainer}>
         <TextInput
-          placeholder="Add your goal"
+          placeholder="Search your goal"
           placeholderTextColor="gray"
-          value={newGoal}
+          value={searchGoal}
           // secureTextEntry={true}
           style={styles.input}
-          onChangeText={(text) => setNewGoal(text)}
+          onChangeText={(text) => setSearchGoal(text)}
         />
         {/* <Button title="check"  /> */}
-        <Pressable style={styles.addButton} onPress={addGoal}>
+        <Pressable
+          style={styles.addButton}
+          onPress={() => goalModalRef.current?.open()}
+        >
           <Text style={styles.addButtonText}>Add</Text>
         </Pressable>
       </View>
-      <FlatList
-        data={goals}
+      <Animated.FlatList
+        data={filteredGoals}
         // renderItem={(goal) => <></>}
         renderItem={renderItem}
         keyExtractor={(goal) => goal.id.toString()}
+        itemLayoutAnimation={LinearTransition}
+        keyboardDismissMode={"on-drag"}
       />
+      <GoalModal ref={goalModalRef} onAddGoal={addGoal} />
+      <StatusBar style={colorScheme == "dark" ? "light" : "dark"} />
     </SafeAreaView>
   );
 }
 
-const createStyles = () => {
+const createStyles = (
+  theme: ThemeType | undefined,
+  colorScheme: "light" | "dark" | null | undefined
+) => {
   return StyleSheet.create({
     viewContainer: {
       // height: "100%",
       flex: 1,
       // justifyContent: "center",
       // width: "100%",
-      backgroundColor: "black",
+      backgroundColor: theme?.background,
     },
     inputContainer: {
       flexDirection: "row",
@@ -139,46 +171,16 @@ const createStyles = () => {
       marginRight: 10,
       fontSize: 18,
       minWidth: 0,
-      color: "white",
+      color: theme?.text,
     },
     addButton: {
-      backgroundColor: "white",
+      backgroundColor: theme?.button,
       borderRadius: 5,
       padding: 10,
     },
     addButtonText: {
       fontSize: 18,
-      color: "black",
-    },
-    goalContainer: {
-      padding: 10,
-      borderBottomColor: "gray",
-      borderBottomWidth: 1,
-    },
-    goal: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 4,
-
-      width: "100%",
-      maxWidth: 1024, // ipad pro size
-      marginHorizontal: "auto",
-      pointerEvents: "auto",
-    },
-    goalText: {
-      fontSize: 18,
-      color: "white",
-    },
-    goalCompletedText: {
-      textDecorationLine: "line-through",
-      textDecorationColor: "red",
-    },
-    goalCreatedTime: {
-      color: "white",
-      marginInlineStart: "auto",
-      marginTop: 10,
-      marginEnd: 5,
+      color: colorScheme == "dark" ? "black" : "white",
     },
   });
 };
